@@ -1,0 +1,577 @@
+FUNCTION z_fi_req_paym_post_b00.
+*"----------------------------------------------------------------------
+*"*"Local Interface:
+*"  IMPORTING
+*"     VALUE(IS_PAYMENT) TYPE  ZFI_S0132 OPTIONAL
+*"     VALUE(IV_TEST_RUN) TYPE  ZFI_DE_TEST_RUN DEFAULT ' '
+*"  CHANGING
+*"     VALUE(CS_PAYMENT_RES) TYPE  ZFI_S0133 OPTIONAL
+*"----------------------------------------------------------------------
+
+  DATA: ls_origin            TYPE bapi2021_origin,
+        ls_organisations     TYPE bapi2021_organisations,
+        ls_accounts          TYPE bapi2021_accounts,
+        ls_amounts           TYPE bapi2021_amounts,
+        ls_value_dates       TYPE bapi2021_dates,
+        ls_paym_control      TYPE bapi2021_paymentctrl,
+        ls_corr_doc          TYPE bapi2021_corrdoc,
+        ls_references        TYPE bapi2021_references,
+        ls_return            TYPE bapiret2,
+        lv_requestid         TYPE bapi2021_keyno-requestid,
+        lt_address_data      TYPE TABLE OF bapi2021_address,
+        lt_bank_data         TYPE TABLE OF bapi2021_bank,
+        ls_mainpay_item_data TYPE fibl_opay_posting_if,
+        ls_opay_doc_if       TYPE fibl_opay_doc_if,
+        ls_references_v      TYPE bapi2021_references,
+        ls_payment_request   type FINS_PAYT_REQUEST_ON_POST_ENH,
+        ls_extension         type BAPIPAREX,
+        lt_extension         type TABLE OF BAPIPAREX.
+
+  DATA: lv_like TYPE string.
+
+  DATA: lv_partn     TYPE bu_partner,
+        lv_bukrs     TYPE bukrs,
+        "lv_creat     TYPE char1,
+        ls_trans     TYPE zfi_s0142,
+        lt_return    TYPE bapiret2_t,
+        lv_bukrs_non TYPE bukrs,
+        lv_prq_parno TYPE prq_parno,
+        lv_bankn     TYPE t012k-bankn,
+        lv_amt       TYPE cms_dte_conv_amt.
+
+  IF is_payment-bukrs IS NOT INITIAL.
+    SELECT SINGLE nonsap_ind
+      FROM zfi_ct0046
+      INTO @DATA(lv_nonsap_ind)
+      WHERE bukrs EQ @is_payment-bukrs.
+    IF lv_nonsap_ind EQ 'X'.
+      lv_bukrs_non = 'C000'.
+      lv_prq_parno = 'C103999999'.
+    ELSE.
+      lv_bukrs_non = is_payment-bukrs.
+      lv_prq_parno = '1039999999'.
+    ENDIF.
+
+    SELECT SINGLE waers
+      FROM t001
+      INTO @DATA(lv_hwaer)
+      WHERE bukrs EQ @lv_bukrs_non.
+  ENDIF.
+
+  IF is_payment-from_iban IS NOT INITIAL.
+    SELECT revision,
+           bukrs,
+           acc_num
+      FROM fclm_bam_amd
+      INTO TABLE @DATA(lt_fclm_bam_amd)
+      WHERE bukrs   EQ @is_payment-bukrs
+        AND acc_num NOT LIKE 'S-%'
+        AND iban    EQ @is_payment-from_iban.
+
+    SORT: lt_fclm_bam_amd BY revision DESCENDING.
+    READ TABLE lt_fclm_bam_amd
+      INTO DATA(ls_fclm_bam_amd)
+      INDEX 1.
+    IF sy-subrc EQ 0.
+      SELECT SINGLE bukrs,
+                    hbkid,
+                    hktid
+        FROM t012k
+        INTO @DATA(ls_t012k)
+        WHERE bukrs EQ @ls_fclm_bam_amd-bukrs
+          AND bankn EQ @ls_fclm_bam_amd-acc_num.
+      IF sy-subrc EQ 0.
+        SELECT SINGLE zbukr,
+                      ukont
+          FROM t042y
+          INTO @DATA(ls_t042y)
+          WHERE zbukr EQ @ls_t012k-bukrs
+            AND hbkid EQ @ls_t012k-hbkid
+            AND hktid EQ @ls_t012k-hktid.
+      ENDIF.
+    ENDIF.
+  ELSEIF is_payment-prctr IS NOT INITIAL
+     AND is_payment-waers IS NOT INITIAL.
+
+    lv_bankn = 'X' && is_payment-waers &&
+        condense( |{ is_payment-prctr ALPHA = OUT }| ).
+
+    SELECT SINGLE bukrs,
+                  hbkid,
+                  hktid
+       FROM t012k
+       INTO @ls_t012k
+       WHERE bankn EQ @lv_bankn.
+    IF sy-subrc EQ 0.
+      SELECT SINGLE zbukr,
+                    ukont
+        FROM t042y
+        INTO @ls_t042y
+        WHERE zbukr EQ @ls_t012k-bukrs
+          AND hbkid EQ @ls_t012k-hbkid
+          AND hktid EQ @ls_t012k-hktid.
+    ENDIF.
+  ENDIF.
+
+  IF is_payment-zlsch IS NOT INITIAL.
+    cs_payment_res-zz_zlsch = is_payment-zlsch.
+  ELSE.
+    SELECT SINGLE zlsch
+      FROM zfi_ct0048
+      INTO @cs_payment_res-zz_zlsch
+      WHERE bukrs     EQ @is_payment-bukrs
+        AND pay_type  EQ @is_payment-pay_type.
+  ENDIF.
+
+  lv_like = is_payment-waers(2) && '%'.
+
+  IF is_payment-partner_iban IS NOT INITIAL.
+    SELECT SINGLE b1~partner,
+                  b1~bkvid,
+                  b1~banks,
+                  b1~bankl,
+                  b1~bankn,
+                  b1~xezer,
+                  b2~swift
+      FROM but0bk AS b1
+      INNER JOIN tiban AS t1 ON t1~bankl EQ b1~bankl
+                            AND t1~bankn EQ b1~bankn
+      INNER JOIN bnka  AS b2 ON b2~banks EQ b1~banks
+                            AND b2~bankl EQ b1~bankl
+      INTO @DATA(ls_but0bk)
+      WHERE b1~partner EQ @is_payment-partner
+        AND ( b1~bkvid   LIKE @lv_like
+           OR b1~bkvid   LIKE 'HC%' )
+        AND t1~iban    EQ @is_payment-partner_iban.
+  ELSE.
+    SELECT SINGLE b1~partner,
+                  b1~bkvid,
+                  b1~banks,
+                  b1~bankl,
+                  b1~bankn,
+                  b1~xezer,
+                  b2~swift
+      FROM but0bk AS b1
+      INNER JOIN bnka  AS b2 ON b2~banks EQ b1~banks
+                            AND b2~bankl EQ b1~bankl
+      INTO @ls_but0bk
+      WHERE b1~partner EQ @is_payment-partner
+        AND ( b1~bkvid   LIKE @lv_like
+           OR b1~bkvid   LIKE 'HC%' )
+        AND b1~bankn   EQ @is_payment-partner_bankn
+        AND b1~bankl   EQ @is_payment-partner_bankl.
+  ENDIF.
+
+
+  IF is_payment-partner_iban IS NOT INITIAL.
+    lv_partn = |{ is_payment-partner ALPHA = OUT }|.
+
+    IF    lv_partn IS NOT INITIAL
+      AND strlen( lv_partn ) GE 4.
+      lv_bukrs = lv_partn(4).
+    ENDIF.
+
+    IF lv_bukrs IS NOT INITIAL.
+      SELECT revision,
+           bukrs,
+           acc_num,
+           prctr
+      FROM fclm_bam_amd
+      INTO TABLE @DATA(lt_fclm_bam_amd_p)
+*      WHERE bukrs   EQ @lv_bukrs_non
+      WHERE bukrs   EQ @lv_bukrs
+        AND acc_num NOT LIKE 'S-%'
+        AND iban    EQ @is_payment-partner_iban.
+
+      SORT: lt_fclm_bam_amd_p BY revision DESCENDING.
+      READ TABLE lt_fclm_bam_amd_p
+        INTO DATA(ls_fclm_bam_amd_p)
+        INDEX 1.
+      IF sy-subrc EQ 0.
+        SELECT SINGLE bukrs,
+                      hbkid,
+                      hktid,
+                      hkont
+          FROM t012k
+          INTO @DATA(ls_t012k_p)
+          WHERE bukrs EQ @ls_fclm_bam_amd_p-bukrs
+            AND bankn EQ @ls_fclm_bam_amd_p-acc_num.
+      ENDIF.
+    ENDIF.
+
+  ENDIF.
+
+*  SELECT SINGLE name_org1,
+*                name_org2
+*    FROM but000
+*    INTO @DATA(ls_but000)
+*    WHERE partner EQ @is_payment-partner.
+
+  SELECT SINGLE name1,
+                name2,
+                name3,
+                pstlz,
+                ort01,
+                stras,
+                land1,
+                regio,
+                telf1,
+                telfx,
+                spras
+    FROM lfa1
+    INTO @DATA(ls_lfa1)
+    WHERE lifnr EQ @is_payment-partner.
+
+  SELECT SINGLE land1,
+                blart
+    FROM t042z
+    INTO @DATA(ls_t042z)
+    WHERE land1 EQ 'TR'
+      AND zlsch EQ @cs_payment_res-zz_zlsch.
+
+  SELECT SINGLE akont
+    FROM lfb1
+    INTO @cs_payment_res-zz_hkont
+*    WHERE bukrs EQ @is_payment-bukrs
+    WHERE bukrs EQ @lv_bukrs_non
+      AND lifnr EQ @is_payment-partner.
+  IF    sy-subrc EQ 0
+    AND is_payment-sp_gl_ind IS NOT INITIAL.
+
+    SELECT SINGLE skont
+      FROM t074
+      INTO @DATA(lv_skont)
+      WHERE ktopl EQ 'SGHP'
+        AND koart EQ 'K'
+        AND umskz EQ @is_payment-sp_gl_ind
+        AND hkont EQ @cs_payment_res-zz_hkont.
+
+    cs_payment_res-zz_hkont = lv_skont.
+  ENDIF.
+
+  ls_origin-origin = 'FI-AP-PR'.
+
+  ls_organisations-comp_code      = lv_bukrs_non.
+  ls_organisations-pay_comp_code  = lv_bukrs_non.
+  ls_organisations-send_comp_code = lv_bukrs_non.
+  ls_organisations-bus_area       = is_payment-bus_area.
+
+  ls_accounts-acct_type           = 'S'.
+  ls_accounts-partner_account     = lv_prq_parno.
+  ls_accounts-reconcil_account    = lv_prq_parno.
+  ls_accounts-bank_clearing_acct  = ls_t042y-ukont.
+
+  ls_amounts-paym_curr        = is_payment-waers.
+  ls_amounts-loc_currcy       = 'TRY'.
+  ls_amounts-lc2_curr         = 'USD'.
+  ls_amounts-lc3_curr         = 'EUR'.
+  ls_amounts-paym_amount_long = -1 * is_payment-amount_payment.
+  IF is_payment-amount_payment_loc IS NOT INITIAL.
+    ls_amounts-lc_amount_long = -1 * is_payment-amount_payment_loc.
+  ELSEIF is_payment-rate_type IS NOT INITIAL
+     AND is_payment-waers     NE lv_hwaer.
+    CALL FUNCTION 'CMS_API_CURR_CONV'
+      EXPORTING
+        i_original_curr = is_payment-waers
+        i_original_amt  = is_payment-amount_payment
+        i_result_curr   = lv_hwaer
+        i_rate_type     = is_payment-rate_type
+        i_conv_date     = is_payment-value_date
+      IMPORTING
+        e_conv_amt      = lv_amt.
+
+    ls_amounts-lc_amount_long = -1 * lv_amt.
+  ENDIF.
+
+  ls_value_dates-due_date             = is_payment-value_date.
+  ls_value_dates-value_date_sender    = is_payment-value_date.
+  ls_value_dates-value_date_receiver  = is_payment-value_date.
+
+  ls_paym_control-housebankid           = ls_t012k-hbkid.
+  ls_paym_control-housebankacctid       = ls_t012k-hktid.
+  ls_paym_control-payment_methods       = cs_payment_res-zz_zlsch.
+  ls_paym_control-bankid                = ls_but0bk-bkvid.
+  ls_paym_control-no_exchange_rate_diff = 'X'.
+  ls_paym_control-pmtmthsupl            = is_payment-uzawe.
+  ls_paym_control-indiv_payment         = is_payment-xpore.
+
+  ls_references-item_text = is_payment-sgtxt.
+  ls_references-alloc_nmbr = is_payment-zuonr.
+
+  APPEND INITIAL LINE TO lt_address_data
+    ASSIGNING FIELD-SYMBOL(<lfs_address_data>).
+  <lfs_address_data>-partner_role = '01'.
+  <lfs_address_data>-partner      = is_payment-partner.
+  <lfs_address_data>-name         = ls_lfa1-name1.
+  <lfs_address_data>-name_2       = ls_lfa1-name2.
+  <lfs_address_data>-name_3       = ls_lfa1-name3.
+  <lfs_address_data>-postl_code   = ls_lfa1-pstlz.
+  <lfs_address_data>-city         = ls_lfa1-ort01.
+  <lfs_address_data>-street       = ls_lfa1-stras.
+  <lfs_address_data>-country      = ls_lfa1-land1.
+  <lfs_address_data>-region       = ls_lfa1-regio.
+  <lfs_address_data>-telephone    = ls_lfa1-telf1.
+  <lfs_address_data>-fax_number   = ls_lfa1-telfx.
+  <lfs_address_data>-langu        = ls_lfa1-spras.
+
+  APPEND INITIAL LINE TO lt_address_data
+    ASSIGNING <lfs_address_data>.
+  <lfs_address_data>-partner_role = '02'.
+  <lfs_address_data>-partner      = is_payment-partner.
+  <lfs_address_data>-name         = ls_lfa1-name1.
+  <lfs_address_data>-name_2       = ls_lfa1-name2.
+  <lfs_address_data>-name_3       = ls_lfa1-name3.
+  <lfs_address_data>-postl_code   = ls_lfa1-pstlz.
+  <lfs_address_data>-city         = ls_lfa1-ort01.
+  <lfs_address_data>-street       = ls_lfa1-stras.
+  <lfs_address_data>-country      = ls_lfa1-land1.
+  <lfs_address_data>-region       = ls_lfa1-regio.
+  <lfs_address_data>-telephone    = ls_lfa1-telf1.
+  <lfs_address_data>-fax_number   = ls_lfa1-telfx.
+  <lfs_address_data>-langu        = ls_lfa1-spras.
+
+  APPEND INITIAL LINE TO lt_bank_data
+    ASSIGNING FIELD-SYMBOL(<lfs_bank_data>).
+  <lfs_bank_data>-account_role  = '2'.
+  <lfs_bank_data>-bank_ctry     = ls_but0bk-banks.
+  <lfs_bank_data>-bank_key      = ls_but0bk-bankl.
+  <lfs_bank_data>-bank_no       = ls_but0bk-bankl.
+  <lfs_bank_data>-swift_code    = ls_but0bk-swift.
+  <lfs_bank_data>-bank_acct     = ls_but0bk-bankn.
+  <lfs_bank_data>-partner_bk    = ls_but0bk-bkvid.
+  <lfs_bank_data>-coll_auth     = ls_but0bk-xezer.
+  <lfs_bank_data>-iban          = is_payment-partner_iban.
+*  ls_extension-structure  = 'BSEG'.
+*  ls_extension-valuepart1 = '00000000001'.
+*  ls_extension-valuepart2 = 'C_ACCIT'.
+*  ls_extension-valuepart3 = 'BUPLA'.
+*  ls_extension-valuepart4 = '1000'.
+*  APPEND ls_extension TO lt_extension.
+
+  CALL FUNCTION 'BAPI_PAYMENTREQUEST_CREATE'
+    EXPORTING
+      origin        = ls_origin
+      organisations = ls_organisations
+      accounts      = ls_accounts
+      amounts       = ls_amounts
+      value_dates   = ls_value_dates
+      paym_control  = ls_paym_control
+      corr_doc      = ls_corr_doc
+*     CENTRAL_BANK_REP       =
+*     INSTRUCTIONS  =
+      references    = ls_references
+      releasepost   = 'X'
+      releasepay    = 'X'
+      testrun       = 'X'
+    IMPORTING
+      return        = ls_return
+      requestid     = lv_requestid
+    TABLES
+      address_data  = lt_address_data
+      bank_data     = lt_bank_data
+**     REFERENCE_TEXT         =
+     EXTENSIONIN   = lt_extension.
+    .
+
+  IF ls_return-type CA 'AEX'.
+    APPEND INITIAL LINE TO cs_payment_res-message_list
+      ASSIGNING FIELD-SYMBOL(<lfs_message>).
+    <lfs_message>-type    = ls_return-type.
+    <lfs_message>-message = ls_return-message.
+    RETURN.
+  ENDIF.
+
+  lv_partn = |{ is_payment-partner ALPHA = OUT }|.
+
+*  IF    lv_partn IS NOT INITIAL
+*    AND strlen( lv_partn ) GE 4.
+*    lv_bukrs = lv_partn(4).
+*
+*    PERFORM check_transfer_doc USING lv_bukrs
+*                            CHANGING lv_creat.
+*
+*    IF lv_creat IS NOT INITIAL.
+*      IF lv_nonsap_ind IS INITIAL.
+*        ls_trans-bukrs = lv_bukrs.
+*      ELSE.
+*        ls_trans-bukrs = lv_bukrs_non.
+*      ENDIF.
+*
+*      ls_trans-budat = is_payment-value_date.
+*      ls_trans-bldat = is_payment-value_date.
+*      ls_trans-waers = is_payment-waers.
+*      ls_trans-hkont = ls_t012k_p-hkont.
+*      IF ls_trans-hkont(3) EQ '102'.
+*        ls_trans-hkont(3) = '103'.
+*      ELSEIF ls_trans-hkont(4) EQ 'C102'.
+*        ls_trans-hkont(4) = 'C103'.
+*      ENDIF.
+*      ls_trans-sgtxt = is_payment-sgtxt.
+*      ls_trans-prctr = ls_fclm_bam_amd_p-prctr.
+*      ls_trans-hbkid = ls_t012k_p-hbkid.
+*      ls_trans-hktid = ls_t012k_p-hktid.
+**      ls_trans-lifnr = |{ is_payment-bukrs ALPHA = IN }|.
+**      ls_trans-lifnr = |{ is_payment-prctr ALPHA = IN }|.
+*      ls_trans-kunnr = |{ is_payment-prctr ALPHA = IN }|.
+*      ls_trans-wrbtr = is_payment-amount_payment.
+*
+*      PERFORM create_transfer_doc USING 'X'
+*                                        ls_trans
+*                               CHANGING cs_payment_res-zz_transfer_bukrs
+*                                        cs_payment_res-zz_transfer_belnr
+*                                        cs_payment_res-zz_transfer_gjahr
+*                                        lt_return.
+*
+*      LOOP AT lt_return INTO ls_return
+*        WHERE type CA 'AEX'.
+*
+*        APPEND INITIAL LINE TO cs_payment_res-message_list
+*          ASSIGNING <lfs_message>.
+*        <lfs_message>-type    = ls_return-type.
+*        <lfs_message>-message = ls_return-message.
+*
+*      ENDLOOP.
+*      IF sy-subrc EQ 0.
+*        RETURN.
+*      ENDIF.
+*    ENDIF.
+*  ENDIF.
+
+  CHECK iv_test_run IS INITIAL.
+
+  ls_mainpay_item_data-partner_account    = ls_accounts-partner_account.
+  ls_mainpay_item_data-paym_curr          = is_payment-waers.
+  ls_mainpay_item_data-paym_amount        = is_payment-amount_payment.
+  ls_mainpay_item_data-loc_amount         = ls_amounts-lc_amount_long * -1.
+  ls_mainpay_item_data-loc_currcy         = lv_hwaer.
+  ls_mainpay_item_data-pstng_date         = is_payment-req_paym_date.
+  ls_mainpay_item_data-item_text          = is_payment-sgtxt.
+  ls_mainpay_item_data-doc_type           = ls_t042z-blart.
+  ls_mainpay_item_data-value_date_sender  = is_payment-value_date.
+*  ls_mainpay_item_data-value_date_sender  = is_payment-req_paym_date.
+  ls_mainpay_item_data-housebankid        = ls_t012k-hbkid.
+  ls_mainpay_item_data-housebankacctid    = ls_t012k-hktid.
+  ls_mainpay_item_data-pmtmthsupl         = ls_paym_control-pmtmthsupl.
+
+  ls_opay_doc_if-comp_code    = lv_bukrs_non.
+  ls_opay_doc_if-debited_acct = is_payment-partner.
+  ls_opay_doc_if-acct_type    = 'K'.
+  ls_opay_doc_if-pmtmthsupl   = ls_paym_control-pmtmthsupl.
+  ls_opay_doc_if-bus_area     = is_payment-bus_area.
+
+  CLEAR: ls_return,
+         ls_corr_doc,
+         ls_references_v.
+
+  FREE MEMORY ID 'FIBL_UMSKZ'.
+  EXPORT umskz = is_payment-sp_gl_ind TO MEMORY ID 'FIBL_UMSKZ'.
+
+  FREE MEMORY ID 'FIBL_KOSTL'.
+  IF is_payment-costcenter IS NOT INITIAL.
+    EXPORT kostl = is_payment-costcenter TO MEMORY ID 'FIBL_KOSTL'.
+  ENDIF.
+
+  ls_payment_request-zuonr = is_payment-zuonr.
+  CALL FUNCTION 'FIBL_APARPAY_VEND_POST'
+    EXPORTING
+      ims_mainpay_item_data = ls_mainpay_item_data
+      paym_control          = ls_paym_control
+*     CENTRAL_BANK_REP      =
+      is_opay_doc_if        = ls_opay_doc_if
+      I_PAYMENT_REQUEST     = ls_payment_request
+    IMPORTING
+      exs_return            = ls_return
+      exs_document          = ls_corr_doc
+      exs_references        = ls_references_v
+    CHANGING
+      chs_amounts           = ls_amounts.
+
+  IF ls_return IS NOT INITIAL.
+    APPEND INITIAL LINE TO cs_payment_res-message_list
+      ASSIGNING <lfs_message>.
+    <lfs_message>-type    = ls_return-type.
+    <lfs_message>-message = ls_return-message.
+  ENDIF.
+
+  IF ls_return-type CA 'AEX'.
+    RETURN.
+  ELSEIF ls_corr_doc-ac_doc_no IS INITIAL.
+    APPEND INITIAL LINE TO cs_payment_res-message_list
+      ASSIGNING <lfs_message>.
+    <lfs_message>-type    = 'E'.
+    <lfs_message>-message = ls_return-message.
+    RETURN.
+  ELSE.
+    cs_payment_res-zz_paym_belnr = ls_corr_doc-ac_doc_no.
+    cs_payment_res-zz_paym_bukrs = lv_bukrs_non.
+    cs_payment_res-zz_paym_gjahr = ls_corr_doc-fisc_year.
+  ENDIF.
+
+  CLEAR: ls_return,
+         lv_requestid.
+
+  CALL FUNCTION 'BAPI_PAYMENTREQUEST_CREATE'
+    EXPORTING
+      origin        = ls_origin
+      organisations = ls_organisations
+      accounts      = ls_accounts
+      amounts       = ls_amounts
+      value_dates   = ls_value_dates
+      paym_control  = ls_paym_control
+      corr_doc      = ls_corr_doc
+*     CENTRAL_BANK_REP       =
+*     INSTRUCTIONS  =
+      references    = ls_references
+      releasepost   = 'X'
+      releasepay    = 'X'
+      testrun       = ' '
+    IMPORTING
+      return        = ls_return
+      requestid     = lv_requestid
+    TABLES
+      address_data  = lt_address_data
+      bank_data     = lt_bank_data
+*     REFERENCE_TEXT         =
+     EXTENSIONIN   = lt_extension
+    .
+
+  IF ls_return IS NOT INITIAL.
+    APPEND INITIAL LINE TO cs_payment_res-message_list
+      ASSIGNING <lfs_message>.
+    <lfs_message>-type    = ls_return-type.
+    <lfs_message>-message = ls_return-message.
+  ELSEIF lv_requestid IS NOT INITIAL.
+    APPEND INITIAL LINE TO cs_payment_res-message_list
+      ASSIGNING <lfs_message>.
+    <lfs_message>-type    = 'S'.
+    <lfs_message>-message = TEXT-040 && | | && lv_requestid.
+  ENDIF.
+
+  IF ls_return-type CA 'AEX'.
+    CALL FUNCTION 'BAPI_TRANSACTION_ROLLBACK'.
+    RETURN.
+  ELSE.
+    CALL FUNCTION 'BAPI_TRANSACTION_COMMIT'.
+
+    cs_payment_res-batch_status   = 'S'.
+    cs_payment_res-zz_paym_number = lv_requestid.
+  ENDIF.
+
+*  IF lv_creat IS NOT INITIAL.
+*    PERFORM create_transfer_doc USING ' '
+*                                      ls_trans
+*                             CHANGING cs_payment_res-zz_transfer_bukrs
+*                                      cs_payment_res-zz_transfer_belnr
+*                                      cs_payment_res-zz_transfer_gjahr
+*                                      lt_return.
+*    IF lt_return IS NOT INITIAL.
+*      LOOP AT lt_return ASSIGNING FIELD-SYMBOL(<lfs_return>).
+*        APPEND INITIAL LINE TO cs_payment_res-message_list
+*          ASSIGNING <lfs_message>.
+*        <lfs_message>-type    = <lfs_return>-type.
+*        <lfs_message>-message = <lfs_return>-message.
+*      ENDLOOP.
+*    ENDIF.
+*  ENDIF.
+
+ENDFUNCTION.

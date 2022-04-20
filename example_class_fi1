@@ -1,0 +1,1534 @@
+*&---------------------------------------------------------------------*
+*& Include          ZFI_DI_0078_CLS
+*&---------------------------------------------------------------------*
+
+INTERFACE lif_event_receiver.
+  METHODS:
+
+    handle_user_command FOR EVENT user_command OF cl_gui_alv_grid
+      IMPORTING
+        e_ucomm,
+
+
+    handle_before_user_command FOR EVENT before_user_command OF cl_gui_alv_grid
+      IMPORTING
+        e_ucomm,
+
+
+    handle_after_user_command FOR EVENT after_user_command OF cl_gui_alv_grid
+      IMPORTING
+        e_ucomm,
+
+
+    handle_data_changed FOR EVENT data_changed OF cl_gui_alv_grid
+      IMPORTING
+        er_data_changed,
+
+
+    handle_data_changed_finished FOR EVENT data_changed_finished OF cl_gui_alv_grid
+      IMPORTING
+        e_modified
+        et_good_cells,
+
+
+    handle_hotspot_click FOR EVENT hotspot_click OF cl_gui_alv_grid
+      IMPORTING
+        e_row_id
+        e_column_id
+        es_row_no,
+
+
+    handle_toolbar FOR EVENT toolbar OF cl_gui_alv_grid
+      IMPORTING
+        e_object
+        e_interactive,
+
+
+    handle_toolbar_event FOR EVENT toolbar OF cl_gui_alv_grid
+      IMPORTING
+        e_object
+        e_interactive,
+
+
+    handle_print_top_of_page FOR EVENT print_top_of_page OF cl_gui_alv_grid
+      IMPORTING
+        table_index,
+
+
+    handle_top_of_page FOR EVENT top_of_page OF cl_gui_alv_grid
+      IMPORTING
+        e_dyndoc_id
+        table_index,
+
+
+    handle_subtotal_text FOR EVENT subtotal_text OF cl_gui_alv_grid
+      IMPORTING
+        es_subtottxt_info
+        ep_subtot_line
+        e_event_data,
+
+
+    handle_double_click FOR EVENT double_click OF cl_gui_alv_grid
+      IMPORTING
+        e_row
+        e_column
+        es_row_no,
+
+
+    handle_button_click FOR EVENT button_click OF cl_gui_alv_grid
+      IMPORTING
+        es_col_id
+        es_row_no,
+
+
+    handle_on_f4 FOR EVENT onf4 OF cl_gui_alv_grid
+      IMPORTING
+        e_fieldname
+        e_fieldvalue
+        es_row_no
+        er_event_data
+        et_bad_cells
+        e_display.
+
+
+ENDINTERFACE.
+
+INTERFACE lif_prepearing_alv.
+  METHODS:
+
+    create_container
+      IMPORTING
+        iv_cont_name        TYPE scrfname
+      CHANGING
+        co_custom_container TYPE REF TO cl_gui_custom_container
+        co_alvgrid          TYPE REF TO cl_gui_alv_grid,
+
+
+    create_layout
+      IMPORTING
+        iv_title         TYPE lvc_title
+      RETURNING
+        VALUE(rs_layout) TYPE lvc_s_layo,
+
+
+    create_variant
+      IMPORTING
+        iv_handle         TYPE slis_handl
+      RETURNING
+        VALUE(rs_variant) TYPE disvariant,
+
+
+    create_fieldcatalog
+      IMPORTING
+        iv_structure_name      TYPE tabname
+      RETURNING
+        VALUE(rt_fieldcatalog) TYPE lvc_t_fcat,
+
+
+    create_toolbar_excluding
+      RETURNING
+        VALUE(rt_toolbar_exclude) TYPE ui_functions,
+
+
+    create_sort_filter
+      IMPORTING
+        iv_field              TYPE lvc_fname
+        it_fieldcatalog       TYPE lvc_t_fcat
+      RETURNING
+        VALUE(rt_sort_filter) TYPE lvc_t_sort,
+
+
+    display_alv
+      IMPORTING
+        is_layout            TYPE lvc_s_layo
+        is_variant           TYPE disvariant
+        iv_save              TYPE char01
+        it_toolbar_excluding TYPE ui_functions OPTIONAL
+      CHANGING
+        co_alvgird           TYPE REF TO cl_gui_alv_grid
+        ct_output            TYPE ANY TABLE
+        ct_fielcat           TYPE lvc_t_fcat
+        ct_sort              TYPE lvc_t_sort OPTIONAL,
+
+
+    refresh_alv
+      CHANGING
+        co_alvgird TYPE REF TO cl_gui_alv_grid,
+
+
+    call_screen.
+
+
+ENDINTERFACE.
+
+
+INTERFACE lif_pai_buttons.
+  METHODS:
+
+    save_button_action,
+
+
+    back_button_action,
+
+
+    exit_button_action,
+
+
+    post_button_action.
+
+
+ENDINTERFACE.
+
+
+INTERFACE lif_check_screen.
+
+  METHODS:
+    check_bukrs
+      IMPORTING
+        iv_bukrs TYPE dzbukr,
+
+
+    search_help_laufd
+      CHANGING
+        cv_laufd TYPE laufd,
+
+
+    search_help_laufi
+      CHANGING
+        cv_laufi TYPE laufi,
+
+
+    mapping_lifnr
+      IMPORTING
+        iv_bukrs TYPE bukrs,
+
+
+    call_maintenance
+      IMPORTING
+        iv_ucomm TYPE syucomm,
+
+
+    enabled_disabled_control,
+
+
+    mapping_function_key.
+
+
+
+ENDINTERFACE.
+
+
+
+
+
+CLASS lcl_alv DEFINITION.
+
+  PUBLIC SECTION.
+
+
+    INTERFACES:
+
+      lif_event_receiver,
+
+      lif_prepearing_alv,
+
+      lif_pai_buttons,
+
+      lif_check_screen.
+
+
+
+
+    CLASS-METHODS:
+
+      get_instance
+        RETURNING
+          VALUE(ro_alv) TYPE REF TO lcl_alv.
+
+
+
+    METHODS:
+      update_database_table,
+
+      get_data,
+
+      prepare_alv,
+
+      check_screen.
+
+
+
+  PRIVATE SECTION.
+
+    CLASS-DATA:
+
+      lo_instance TYPE REF TO lcl_alv.
+
+ENDCLASS.
+
+CLASS lcl_alv IMPLEMENTATION.
+
+
+  METHOD get_instance.
+
+    lo_instance = COND #( WHEN lo_instance IS NOT BOUND
+                          THEN NEW #(  )  ).
+
+    ro_alv = COND #( WHEN lo_instance IS BOUND
+                     THEN lo_instance ).
+  ENDMETHOD.
+
+
+  METHOD update_database_table.
+
+*
+*    SELECT
+*      zfi_t0150~bukrs,
+*      zfi_t0150~belnr,
+*      zfi_t0150~gjahr,
+*      zfi_t0150~buzei,
+*      zfi_t0150~pyord,
+*      zfi_t0150~laufd,
+*      zfi_t0150~laufi,
+*      zfi_t0150~rzawe,
+*      zfi_t0150~hbkid,
+*      zfi_t0150~hktid,
+*      zfi_t0150~hkont,
+*      zfi_t0150~kunnr,
+*      zfi_t0150~wrbtr,
+*      zfi_t0150~xblnr,
+*      zfi_t0150~zzprctr,
+*      zfi_t0150~rwbtr,
+*      zfi_t0150~waers,
+*      zfi_t0150~post_number,
+*      zfi_t0150~post_year,
+*      zfi_t0150~clearing_number,
+*      zfi_t0150~clearing_year
+*
+*
+*      FROM zfi_t0150 AS zfi_t0150
+*
+*
+*     INNER
+*      JOIN bkpf AS bkpf
+*        ON zfi_t0150~post_number EQ bkpf~belnr
+*       AND zfi_t0150~bukrs       EQ bkpf~bukrs
+*       AND zfi_t0150~gjahr       EQ bkpf~gjahr
+*
+*
+*      INTO
+*     TABLE
+*     @DATA(lt_post_number)
+*     WHERE zfi_t0150~post_number NE @space
+*       AND ( bkpf~xreversed      EQ @abap_true
+*          OR bkpf~xreversing     EQ @abap_true ).
+
+
+
+
+
+
+
+
+    SELECT
+      zfi_t0150~bukrs,
+      zfi_t0150~belnr,
+      zfi_t0150~gjahr,
+      zfi_t0150~buzei,
+      zfi_t0150~pyord,
+      zfi_t0150~laufd,
+      zfi_t0150~laufi,
+      zfi_t0150~rzawe,
+      zfi_t0150~hbkid,
+      zfi_t0150~hktid,
+      zfi_t0150~lifnr,
+      zfi_t0150~kunnr,
+      zfi_t0150~wrbtr,
+      zfi_t0150~xblnr,
+      zfi_t0150~zzprctr,
+      zfi_t0150~rwbtr,
+      zfi_t0150~waers,
+*      zfi_t0150~post_number,
+*      zfi_t0150~post_year,
+      zfi_t0150~clearing_number,
+      zfi_t0150~clearing_year
+
+
+      FROM zfi_t0150 AS zfi_t0150
+
+
+     INNER
+      JOIN bkpf AS bkpf
+        ON zfi_t0150~clearing_number EQ bkpf~belnr
+       AND zfi_t0150~bukrs           EQ bkpf~bukrs
+       AND zfi_t0150~clearing_year   EQ bkpf~gjahr
+
+
+      INTO
+     TABLE
+     @DATA(lt_clearing_number)
+     WHERE zfi_t0150~clearing_number NE @space
+       AND ( bkpf~xreversed          EQ @abap_true
+          OR bkpf~xreversing         EQ @abap_true ).
+
+
+
+
+*    gt_post_number_all     = CORRESPONDING #( lt_post_number
+*                                                EXCEPT
+*                                                  post_number  ).
+
+*    gt_clearing_number_all = CORRESPONDING #( lt_clearing_number
+*                                                EXCEPT
+*                                                  clearing_number ).
+*
+*    APPEND LINES OF:
+*      gt_post_number_all     TO gt_zfi_t0150,
+*      gt_clearing_number_all TO gt_zfi_t0150.
+
+
+    gt_zfi_t0150 = CORRESPONDING #( lt_clearing_number ).
+
+    DELETE zfi_t0150 FROM TABLE gt_zfi_t0150.
+    COMMIT WORK AND WAIT.
+
+  ENDMETHOD.
+
+
+  METHOD get_data.
+
+
+    IF p_lifnr IS INITIAL.
+      MESSAGE 'ING Satıcısı alanı boş bırakılamaz!' TYPE 'S' DISPLAY LIKE 'E'.
+      RETURN.
+    ENDIF.
+
+    CASE 'X'.
+      WHEN rb1.
+
+        SELECT
+          pyordp~bukrs,
+          pyordp~belnr,
+          pyordp~gjahr,
+          pyordp~buzei,
+          bseg~gsber,
+          pyordh~pyord,
+          pyordh~laufd,
+          pyordh~laufi,
+          pyordh~rzawe,
+          pyordh~lifnr,
+          lfa1~NAME1 as lifnr_name,
+          pyordh~hbkid,
+          pyordh~hktid,
+          pyordh~kunnr,
+          kna1~name1 as kunnr_name,
+          pyordp~wrbtr,
+          bkpf~xblnr,
+          bseg~zzprctr,
+          pyordh~rwbtr,
+          pyordh~waers
+*      zfi_t0150~post_number,
+*      zfi_t0150~post_year,
+*          zfi_t0150~clearing_number,
+*          zfi_t0150~clearing_year
+
+
+
+        FROM pyordp AS pyordp
+
+
+       INNER
+        JOIN pyordh AS pyordh
+          ON pyordp~pyord EQ pyordh~pyord
+
+
+        LEFT
+        JOIN bkpf AS bkpf
+          ON bkpf~bukrs EQ pyordp~bukrs
+         AND bkpf~belnr EQ pyordp~belnr
+         AND bkpf~gjahr EQ pyordp~gjahr
+
+
+        LEFT
+        JOIN bseg AS bseg
+          ON bseg~bukrs EQ pyordp~bukrs
+         AND bseg~belnr EQ pyordp~belnr
+         AND bseg~gjahr EQ pyordp~gjahr
+         AND bseg~buzei EQ pyordp~buzei
+         LEFT
+         JOIN kna1 as kna1
+           on kna1~kunnr eq pyordh~kunnr
+         LEFT
+         JOIN lfa1 as lfa1
+           on lfa1~lifnr eq pyordh~lifnr
+
+
+*    LEFT
+*    JOIN t012k AS t012k
+*      ON t012k~bukrs EQ pyordp~bukrs
+*     AND t012k~hbkid EQ pyordh~hbkid
+*     AND t012k~hktid EQ pyordh~hktid
+
+*        LEFT
+*        JOIN zfi_t0150 AS zfi_t0150
+*          ON zfi_t0150~bukrs EQ pyordp~bukrs
+*         AND zfi_t0150~belnr EQ pyordp~belnr
+*         AND zfi_t0150~gjahr EQ pyordp~gjahr
+*         AND zfi_t0150~buzei EQ pyordp~buzei
+
+
+        INTO CORRESPONDING FIELDS OF
+       TABLE @gt_data
+
+       WHERE pyordp~bukrs EQ @p_bukrs
+         AND pyordh~pyord IN @s_pyord
+         AND pyordh~kunnr IN @s_kunnr
+         AND pyordh~laufd IN @s_laufd
+         AND pyordh~laufi IN @s_laufi
+*         AND pyordh~lifnr EQ @p_lifnr
+         AND pyordp~belnr IN @s_belnr
+         AND pyordp~gjahr IN @s_gjahr
+         AND bseg~gsber   in @s_gsber.
+*         AND bkpf~budat   EQ @p_budat.
+
+
+*        DELETE gt_data
+*         WHERE ( clearing_number IS NOT INITIAL
+*              OR clearing_year   IS NOT INITIAL ).
+
+
+
+      WHEN rb2.
+
+
+
+        SELECT
+          bukrs,
+          belnr,
+          gjahr,
+          buzei,
+          pyord,
+          laufd,
+          laufi,
+          rzawe,
+          hbkid,
+          hktid,
+          lifnr,
+          kunnr,
+          wrbtr,
+          xblnr,
+          zzprctr,
+          rwbtr,
+          waers,
+          clearing_number,
+          clearing_year,
+          gsber
+
+
+        FROM zfi_t0150
+
+
+        INTO CORRESPONDING FIELDS OF
+       TABLE @gt_data
+
+
+       WHERE bukrs           EQ @p_bukrs
+         AND pyord           IN @s_pyord
+         AND kunnr           IN @s_kunnr
+         AND laufd           IN @s_laufd
+         AND laufi           IN @s_laufi
+*         AND lifnr           EQ @p_lifnr
+         AND belnr           IN @s_belnr
+         AND gjahr           IN @s_gjahr
+         AND clearing_number NE @space
+         AND clearing_year   NE @space.
+
+
+    ENDCASE.
+
+
+  ENDMETHOD.
+
+  METHOD prepare_alv.
+
+
+    lif_prepearing_alv~create_container(
+      EXPORTING
+        iv_cont_name        = 'CC01'
+      CHANGING
+        co_custom_container = go_custom_container
+        co_alvgrid          = go_alvgrid ).
+
+
+    DATA(ls_layout) = lif_prepearing_alv~create_layout( iv_title = 'BV Raporu' ).
+
+
+    DATA(ls_variant) = lif_prepearing_alv~create_variant( iv_handle = 'A' ).
+
+
+    DATA(lt_fieldcatalog) = lif_prepearing_alv~create_fieldcatalog( iv_structure_name = 'ZFI_T0150' ).
+
+
+    DATA(lt_toolbar_excluding) = lif_prepearing_alv~create_toolbar_excluding( ).
+
+
+    lif_prepearing_alv~display_alv(
+      EXPORTING
+        is_layout            = ls_layout
+        is_variant           = ls_variant
+        iv_save              = 'A'
+*        it_toolbar_excluding = lt_toolbar_excluding
+      CHANGING
+        co_alvgird           = go_alvgrid
+        ct_output            = gt_data
+        ct_fielcat           = lt_fieldcatalog ).
+
+
+    lif_prepearing_alv~refresh_alv(
+      CHANGING
+        co_alvgird = go_alvgrid  ).
+
+
+    lif_prepearing_alv~call_screen( ).
+
+  ENDMETHOD.
+
+  METHOD check_screen.
+
+    lif_check_screen~call_maintenance( iv_ucomm = sscrfields-ucomm ).
+
+    lif_check_screen~mapping_lifnr( iv_bukrs = p_bukrs ).
+
+
+*    lif_check_screen~check_bukrs( iv_bukrs = p_bukrs ).
+*
+*    lif_check_screen~search_help_laufd(
+*      CHANGING
+*        cv_laufd = s_laufd-low ).
+*
+*
+*    lif_check_screen~search_help_laufd(
+*      CHANGING
+*        cv_laufd = s_laufd-high ).
+*
+*    lif_check_screen~search_help_laufi(
+*      CHANGING
+*        cv_laufi = s_laufi-low ).
+*
+*
+*    lif_check_screen~search_help_laufi(
+*      CHANGING
+*        cv_laufi = s_laufi-high ).
+
+  ENDMETHOD.
+
+
+
+  METHOD lif_event_receiver~handle_user_command.
+  ENDMETHOD.                    "handle_user_command
+
+
+  METHOD lif_event_receiver~handle_before_user_command.
+  ENDMETHOD.                    "handle_brefore_user_command
+
+
+  METHOD lif_event_receiver~handle_after_user_command.
+  ENDMETHOD.                    "handle_brefore_user_command
+
+
+  METHOD lif_event_receiver~handle_data_changed.
+  ENDMETHOD.                    "handle_data_changed
+
+
+  METHOD lif_event_receiver~handle_data_changed_finished.
+  ENDMETHOD.                    "handle_data_changed_finished
+
+
+  METHOD lif_event_receiver~handle_hotspot_click.
+  ENDMETHOD.                    "handle_hotspot_click
+
+
+  METHOD lif_event_receiver~handle_toolbar.
+  ENDMETHOD.                    "handle_toolbar
+
+
+  METHOD lif_event_receiver~handle_toolbar_event.
+  ENDMETHOD.                    "handle_toolbar_event
+
+
+  METHOD lif_event_receiver~handle_print_top_of_page.
+  ENDMETHOD.                    "handle_print_top_of_page
+
+
+  METHOD lif_event_receiver~handle_top_of_page.
+  ENDMETHOD.                    "handle_print_top_of_page
+
+
+  METHOD lif_event_receiver~handle_subtotal_text.
+  ENDMETHOD.                    "handle_subtotal_text
+
+
+  METHOD lif_event_receiver~handle_double_click.
+  ENDMETHOD.                    "handle_double_click
+
+
+  METHOD lif_event_receiver~handle_button_click.
+  ENDMETHOD.                    "handle_button_click
+
+
+  METHOD lif_event_receiver~handle_on_f4.
+  ENDMETHOD.                    "handle_on_f4
+
+
+
+  METHOD lif_prepearing_alv~create_container.
+
+    CHECK co_alvgrid IS INITIAL.
+
+    co_custom_container = NEW cl_gui_custom_container(
+                                container_name = iv_cont_name ).
+
+    co_alvgrid = NEW cl_gui_alv_grid(
+                       i_parent = cl_gui_custom_container=>screen0 )."co_custom_container ).
+
+  ENDMETHOD.
+
+  METHOD lif_prepearing_alv~create_layout.
+
+    rs_layout-zebra       = abap_true.
+    rs_layout-smalltitle  = abap_true.
+    rs_layout-cwidth_opt  = abap_true.
+    rs_layout-sel_mode    = 'D'.
+    rs_layout-grid_title  = iv_title.
+    rs_layout-info_fname  = 'COLOR'.
+
+  ENDMETHOD.
+
+  METHOD lif_prepearing_alv~create_variant.
+
+    rs_variant-handle = iv_handle.
+    rs_variant-report = sy-repid.
+
+  ENDMETHOD.
+
+
+  METHOD lif_prepearing_alv~create_fieldcatalog.
+
+
+    CALL FUNCTION 'LVC_FIELDCATALOG_MERGE'
+      EXPORTING
+        i_structure_name       = iv_structure_name
+      CHANGING
+        ct_fieldcat            = rt_fieldcatalog
+      EXCEPTIONS
+        inconsistent_interface = 1
+        program_error          = 2
+        OTHERS                 = 3.
+
+    IF sy-subrc <> 0.
+      MESSAGE ID
+        sy-msgid
+      TYPE
+        sy-msgty
+      NUMBER
+        sy-msgno
+      WITH
+        sy-msgv1
+        sy-msgv2
+        sy-msgv3
+        sy-msgv4.
+    ENDIF.
+
+    LOOP AT rt_fieldcatalog ASSIGNING FIELD-SYMBOL(<lfs_field>).
+      CASE <lfs_field>-fieldname.
+        WHEN 'LIFNR_NAME'.
+            <lfs_field>-scrtext_s = 'Satıcı Ad'.
+            <lfs_field>-scrtext_m = 'Satıcının Adı'.
+            <lfs_field>-scrtext_l = 'Satıcının Adı'.
+            <lfs_field>-coltext   = 'Satıcının Adı'.
+        WHEN 'KUNNR_NAME'.
+            <lfs_field>-scrtext_s = 'Müşteri Adı'.
+            <lfs_field>-scrtext_m = 'Müşterinin Adı'.
+            <lfs_field>-scrtext_l = 'Müşterinin Adı'.
+            <lfs_field>-coltext   = 'Müşterinin Adı'.
+        WHEN OTHERS.
+      ENDCASE.
+
+    ENDLOOP.
+
+  ENDMETHOD.
+
+  METHOD lif_prepearing_alv~create_toolbar_excluding.
+
+
+    rt_toolbar_exclude = VALUE #( ( cl_gui_alv_grid=>mc_fc_loc_cut )
+                                  ( cl_gui_alv_grid=>mc_fc_loc_append_row )
+                                  ( cl_gui_alv_grid=>mc_fc_loc_insert_row )
+                                  ( cl_gui_alv_grid=>mc_fc_loc_move_row )
+                                  ( cl_gui_alv_grid=>mc_fc_loc_paste_new_row )
+                                  ( cl_gui_alv_grid=>mc_fc_check )
+                                  ( cl_gui_alv_grid=>mc_fc_refresh )
+                                  ( cl_gui_alv_grid=>mc_fc_loc_copy )
+                                  ( cl_gui_alv_grid=>mc_fc_loc_cut )
+                                  ( cl_gui_alv_grid=>mc_fc_loc_paste )
+                                  ( cl_gui_alv_grid=>mc_fc_loc_copy_row )
+                                  ( cl_gui_alv_grid=>mc_fc_loc_delete_row )
+                                  ( cl_gui_alv_grid=>mc_fc_loc_undo )
+                                  ( cl_gui_alv_grid=>mc_fc_print )
+                                  ( cl_gui_alv_grid=>mc_mb_sum )
+                                  ( cl_gui_alv_grid=>mc_mb_view )
+                                  ( cl_gui_alv_grid=>mc_mb_variant )
+                                  ( cl_gui_alv_grid=>mc_mb_export )
+                                  ( cl_gui_alv_grid=>mc_fc_find_more )
+                                  ( cl_gui_alv_grid=>mc_fc_find )
+                                  ( cl_gui_alv_grid=>mc_fc_filter )
+                                  ( cl_gui_alv_grid=>mc_fc_sum )
+                                  ( cl_gui_alv_grid=>mc_fc_subtot )
+                                  ( cl_gui_alv_grid=>mc_fc_sort_dsc )
+                                  ( cl_gui_alv_grid=>mc_fc_sort_asc )
+                                  ( cl_gui_alv_grid=>mc_fc_sort )
+                                  ( cl_gui_alv_grid=>mc_fc_detail )
+                                  ( cl_gui_alv_grid=>mc_fc_info )
+                                  ( cl_gui_alv_grid=>mc_fc_graph )
+                                  ( cl_gui_alv_grid=>mc_fc_views )
+                                  ( cl_gui_alv_grid=>mc_fc_variant_admin ) ).
+
+  ENDMETHOD.
+
+  METHOD lif_prepearing_alv~create_sort_filter.
+
+
+    READ TABLE it_fieldcatalog INTO DATA(ls_fieldcatalog)
+      WITH KEY fieldname = iv_field.
+
+    rt_sort_filter = COND #( WHEN sy-subrc EQ 0
+                             THEN
+                            VALUE #( ( fieldname = ls_fieldcatalog-fieldname
+                                        spos     = ls_fieldcatalog-col_pos
+                                        up       = 'X' ) ) ).
+
+  ENDMETHOD.
+  METHOD lif_prepearing_alv~display_alv.
+
+    co_alvgird->register_edit_event(
+      EXPORTING
+        i_event_id = cl_gui_alv_grid=>mc_evt_modified
+      EXCEPTIONS
+        error      = 1
+        OTHERS     = 2 ).
+
+    IF sy-subrc <> 0.
+      MESSAGE ID
+        sy-msgid
+      TYPE
+        sy-msgty
+      NUMBER
+        sy-msgno
+      WITH
+        sy-msgv1
+        sy-msgv2
+        sy-msgv3
+        sy-msgv4.
+    ENDIF.
+
+
+
+    co_alvgird->set_table_for_first_display(
+      EXPORTING
+        is_variant                    = is_variant
+        i_save                        = iv_save
+        is_layout                     = is_layout
+        it_toolbar_excluding          = it_toolbar_excluding
+      CHANGING
+        it_outtab                     = ct_output
+        it_fieldcatalog               = ct_fielcat
+        it_sort                       = ct_sort
+      EXCEPTIONS
+        invalid_parameter_combination = 1
+        program_error                 = 2
+        too_many_lines                = 3
+        OTHERS                        = 4  ).
+*
+*
+    IF sy-subrc <> 0.
+      MESSAGE ID
+        sy-msgid
+      TYPE
+        sy-msgty
+      NUMBER
+        sy-msgno
+      WITH
+        sy-msgv1
+        sy-msgv2
+        sy-msgv3
+        sy-msgv4.
+    ENDIF.
+
+
+  ENDMETHOD.
+
+  METHOD lif_prepearing_alv~refresh_alv.
+
+    CHECK co_alvgird IS NOT INITIAL.
+
+    co_alvgird->refresh_table_display(
+      EXPORTING
+        i_soft_refresh = space
+        is_stable      = VALUE #( row = abap_true
+                                  col = abap_true  ) ) .
+
+  ENDMETHOD.
+
+  METHOD lif_prepearing_alv~call_screen.
+
+
+    IF gt_data IS NOT INITIAL.
+      CALL SCREEN 0100.
+    ELSE.
+      LEAVE LIST-PROCESSING.
+    ENDIF.
+
+  ENDMETHOD.
+
+
+  METHOD lif_pai_buttons~save_button_action.
+  ENDMETHOD.
+
+  METHOD lif_pai_buttons~back_button_action.
+
+    go_alvgrid->free( ).
+    cl_gui_cfw=>flush( ).
+    LEAVE LIST-PROCESSING.
+
+  ENDMETHOD.
+
+  METHOD lif_pai_buttons~exit_button_action.
+
+    go_alvgrid->free( ).
+    cl_gui_cfw=>flush( ).
+    SET SCREEN 0.
+    LEAVE SCREEN.
+
+
+  ENDMETHOD.
+
+  METHOD lif_pai_buttons~post_button_action.
+
+    DATA:
+      lo_log TYPE REF TO cl_ptu_message.
+
+
+    DATA:
+      lt_index_row         TYPE lvc_t_row,
+      lt_row_no            TYPE lvc_t_roid,
+      lt_accountgl         TYPE TABLE OF bapiacgl09,
+      lt_accountreceivable TYPE TABLE OF bapiacar09,
+      lt_currencyamount    TYPE TABLE OF bapiaccr09,
+      lt_return            TYPE TABLE OF bapiret2,
+      lt_blntab            TYPE TABLE OF blntab,
+      lt_ftclear           TYPE TABLE OF ftclear,
+      lt_ftpost            TYPE TABLE OF ftpost,
+      lt_fttax             TYPE TABLE OF fttax.
+
+
+    DATA:
+      ls_t0139             TYPE zfi_t0139,
+      ls_bseg              TYPE bseg,
+      ls_documentheader    TYPE bapiache09,
+      ls_accountgl         TYPE bapiacgl09,
+      ls_accountreceivable TYPE bapiacar09,
+      ls_currencyamount    TYPE bapiaccr09,
+      ls_return            TYPE bapiret2,
+      ls_x001              TYPE x001,
+      ls_t001              TYPE t001,
+      ls_blntab            TYPE blntab,
+      ls_ftclear           TYPE ftclear,
+      ls_ftpost            TYPE ftpost,
+      ls_fttax             TYPE fttax,
+      ls_msg               TYPE bal_s_msg.
+
+
+    DATA:
+      lv_obj_type TYPE awtyp,
+      lv_obj_key  TYPE awkey,
+      lv_obj_sys  TYPE awsys,
+      lv_itemno   TYPE posnr_acc,
+      lv_msgv1    TYPE sy-msgv1,
+      lv_msgv2    TYPE sy-msgv2,
+      lv_diffe    TYPE wrbtr,
+      lv_diffe_s  TYPE char17,
+      lv_date     TYPE char10,
+      lv_mode     TYPE char1 VALUE 'N',
+      lv_error    TYPE boolean.
+
+
+
+
+
+
+    CLEAR:
+      lt_accountreceivable,
+      lt_accountgl,
+      lt_currencyamount,
+      lt_return,
+      lt_blntab,
+      lt_ftclear,
+      lt_ftpost,
+      lt_fttax,
+
+      ls_documentheader,
+      ls_accountgl,
+      ls_accountreceivable,
+      ls_currencyamount,
+      ls_return,
+      ls_blntab,
+      ls_ftclear,
+      ls_ftpost,
+      ls_fttax,
+      ls_msg,
+
+      lv_obj_type,
+      lv_obj_key,
+      lv_obj_sys,
+      lv_itemno,
+      lv_error.
+
+
+
+*    go_alv->update_database_table( ).
+
+    go_alvgrid->check_changed_data( ).
+
+    go_alvgrid->get_selected_rows(
+      IMPORTING
+        et_index_rows = lt_index_row
+        et_row_no     = lt_row_no  ).
+
+
+
+    LOOP AT lt_index_row INTO DATA(ls_index_row).
+
+      READ TABLE gt_data INTO DATA(ls_data)
+           INDEX ls_index_row-index.
+
+      IF sy-subrc EQ 0.
+        IF ( ls_data-clearing_number IS NOT INITIAL
+          OR ls_data-clearing_year   IS NOT INITIAL ).
+          lv_error = abap_true.
+          EXIT.
+        ENDIF.
+      ENDIF.
+    ENDLOOP.
+
+    IF lv_error = abap_true.
+      MESSAGE 'Daha önce işlem yapılmış belgeler seçildi. Lütfen seçiminizi tekrar gözden geçiriniz'
+         TYPE 'I'
+      DISPLAY
+         LIKE 'E'.
+      RETURN.
+    ENDIF.
+
+
+
+
+    LOOP AT lt_index_row INTO ls_index_row.
+
+      READ TABLE gt_data ASSIGNING FIELD-SYMBOL(<fs_data>)
+           INDEX ls_index_row-index.
+
+      IF sy-subrc EQ 0.
+*        ls_documentheader-header_txt    = 'COFACE CUSTOMER PAYMENT'.
+*        ls_documentheader-comp_code     = <fs_data>-bukrs.
+*        ls_documentheader-doc_type      = 'DZ'.
+*        ls_documentheader-doc_date      = p_budat.
+*        ls_documentheader-pstng_date    = p_budat.
+*        ls_documentheader-username      = sy-uname.
+*        ls_documentheader-ref_doc_no    = <fs_data>-xblnr.
+*
+*
+*        ADD 1 TO lv_itemno.
+*        ls_accountreceivable-itemno_acc = lv_itemno.
+*        ls_accountreceivable-customer   = <fs_data>-kunnr.
+*        ls_accountreceivable-item_text  = 'COFACE CUSTOMER PAYMENT'.
+*        ls_accountreceivable-comp_code  = <fs_data>-bukrs.
+*        ls_accountreceivable-profit_ctr = <fs_data>-zzprctr.
+*        ls_accountreceivable-alloc_nmbr = <fs_data>-pyord(10).
+*        APPEND ls_accountreceivable TO lt_accountreceivable.
+*        CLEAR: ls_accountreceivable.
+*
+*
+*        ls_currencyamount-itemno_acc = lv_itemno.
+*        ls_currencyamount-curr_type  = '00'.
+*        ls_currencyamount-currency   = <fs_data>-waers.
+*        ls_currencyamount-amt_doccur = <fs_data>-wrbtr * -1.
+*        APPEND ls_currencyamount TO lt_currencyamount.
+*        CLEAR: ls_currencyamount.
+*
+*
+*        ADD 1 TO lv_itemno.
+*        ls_accountgl-itemno_acc       = lv_itemno.
+*        ls_accountgl-comp_code        = <fs_data>-bukrs.
+*        ls_accountgl-gl_account       = <fs_data>-hkont.
+*        ls_accountgl-item_text        = 'COFACE CUSTOMER PAYMENT'.
+*        ls_accountgl-profit_ctr       = <fs_data>-zzprctr.
+*        ls_accountgl-housebankid      = <fs_data>-hbkid.
+*        ls_accountgl-housebankacctid  = <fs_data>-hktid.
+*        APPEND ls_accountgl TO lt_accountgl.
+*        CLEAR: ls_accountgl.
+*
+*
+*        ls_currencyamount-itemno_acc = lv_itemno.
+*        ls_currencyamount-curr_type  = '00'.
+*        ls_currencyamount-currency   = <fs_data>-waers.
+*        ls_currencyamount-amt_doccur = <fs_data>-wrbtr.
+*        APPEND ls_currencyamount TO lt_currencyamount.
+*        CLEAR: ls_currencyamount.
+
+
+*        SET UPDATE TASK LOCAL.
+*
+*        CALL FUNCTION 'BAPI_ACC_DOCUMENT_POST'
+*          EXPORTING
+*            documentheader    = ls_documentheader
+*          IMPORTING
+*            obj_type          = lv_obj_type
+*            obj_key           = lv_obj_key
+*            obj_sys           = lv_obj_sys
+*          TABLES
+*            accountgl         = lt_accountgl
+*            accountreceivable = lt_accountreceivable
+*            currencyamount    = lt_currencyamount
+*            return            = lt_return.
+
+**********************************************************************
+
+*        <fs_data>-post_number = lv_obj_key(10).
+*        <fs_data>-post_year   = lv_obj_key+14(4).
+
+*        CLEAR ls_ftclear.
+*        ls_ftclear-agkoa = 'D'.
+*        ls_ftclear-agums = ' '.
+*        ls_ftclear-agbuk = <fs_data>-bukrs.
+*        ls_ftclear-selfd = 'BELNR'.
+*        ls_ftclear-xnops = 'X'.
+*
+*        CONCATENATE <fs_data>-belnr
+*                    <fs_data>-gjahr
+*                    <fs_data>-buzei
+*               INTO ls_ftclear-selvon.
+*
+*        APPEND ls_ftclear TO lt_ftclear.
+
+
+*        CLEAR ls_ftclear.
+*        ls_ftclear-agkoa = 'D'.
+*        ls_ftclear-agums = ' '.
+*        ls_ftclear-agbuk = <fs_data>-bukrs.
+*        ls_ftclear-selfd = 'BELNR'.
+*        ls_ftclear-xnops = 'X'.
+*
+*        CONCATENATE lv_obj_key(10)
+*                    lv_obj_key+14(4)
+*                    '001'
+*               INTO ls_ftclear-selvon.
+*
+*        APPEND ls_ftclear TO lt_ftclear.
+
+        CLEAR ls_ftclear.
+        ls_ftclear-agkoa = 'D'.
+        ls_ftclear-agkon = <fs_data>-kunnr.
+        ls_ftclear-agums = ' '.
+        ls_ftclear-agbuk = <fs_data>-bukrs.
+        ls_ftclear-selfd = 'PYORD'.
+        ls_ftclear-xnops = 'X'.
+        ls_ftclear-selvon = <fs_data>-pyord.
+
+        APPEND ls_ftclear TO lt_ftclear.
+
+
+        ls_ftpost-stype = 'K'.
+        ls_ftpost-count = 1.
+        ls_ftpost-fnam  = 'BKPF-BUKRS'.
+        ls_ftpost-fval  = <fs_data>-bukrs.
+        CONDENSE ls_ftpost-fval.
+        APPEND ls_ftpost TO lt_ftpost.
+
+
+        ls_ftpost-stype = 'K'.
+        ls_ftpost-count = 1.
+        ls_ftpost-fnam  = 'BKPF-BLART'.
+        ls_ftpost-fval  = 'CL'.
+        CONDENSE ls_ftpost-fval.
+        APPEND ls_ftpost TO lt_ftpost.
+
+
+        WRITE p_budat TO lv_date DD/MM/YYYY.
+        ls_ftpost-stype = 'K'.
+        ls_ftpost-count = 1.
+        ls_ftpost-fnam  = 'BKPF-BLDAT'.
+        ls_ftpost-fval  = lv_date.
+        CONDENSE ls_ftpost-fval.
+        APPEND ls_ftpost TO lt_ftpost.
+
+
+        ls_ftpost-stype = 'K'.
+        ls_ftpost-count = 1.
+        ls_ftpost-fnam  = 'BKPF-BUDAT'.
+        ls_ftpost-fval  = lv_date.
+        CONDENSE ls_ftpost-fval.
+        APPEND ls_ftpost TO lt_ftpost.
+
+
+        ls_ftpost-stype = 'K'.
+        ls_ftpost-count = 1.
+        ls_ftpost-fnam  = 'BKPF-WAERS'.
+        ls_ftpost-fval  = <fs_data>-waers.
+        CONDENSE ls_ftpost-fval.
+        APPEND ls_ftpost TO lt_ftpost.
+
+
+        ls_ftpost-stype = 'K'.
+        ls_ftpost-count = 1.
+        ls_ftpost-fnam  = 'BKPF-XBLNR'.
+        ls_ftpost-fval  = <fs_data>-xblnr.
+        CONDENSE ls_ftpost-fval.
+        APPEND ls_ftpost TO lt_ftpost.
+
+
+        ls_ftpost-stype = 'P'.
+        ls_ftpost-count = 2.
+        ls_ftpost-fnam  = 'RF05A-NEWBS'.
+        ls_ftpost-fval  = '25'.
+        CONDENSE ls_ftpost-fval.
+        APPEND ls_ftpost TO lt_ftpost.
+
+
+        ls_ftpost-stype = 'P'.
+        ls_ftpost-count = 2.
+        ls_ftpost-fnam  = 'RF05A-NEWKO'.
+        ls_ftpost-fval  = p_lifnr.
+        CONDENSE ls_ftpost-fval.
+        APPEND ls_ftpost TO lt_ftpost.
+
+
+        ls_ftpost-stype = 'P'.
+        ls_ftpost-count = 2.
+        ls_ftpost-fnam  = 'BSEG-WRBTR'.
+        ls_ftpost-fval  = <fs_data>-wrbtr.
+        REPLACE ALL OCCURRENCES OF '.' IN ls_ftpost-fval WITH ','.
+        CONDENSE ls_ftpost-fval.
+        APPEND ls_ftpost TO lt_ftpost.
+
+
+        ls_ftpost-stype = 'P'.
+        ls_ftpost-count = 2.
+        ls_ftpost-fnam  = 'BSEG-ZUONR'.
+        ls_ftpost-fval  = <fs_data>-pyord.
+        CONDENSE ls_ftpost-fval.
+        APPEND ls_ftpost TO lt_ftpost.
+
+        ls_ftpost-stype = 'P'.
+        ls_ftpost-count = 2.
+        ls_ftpost-fnam  = 'BSEG-GSBER'.
+        ls_ftpost-fval  = <fs_data>-gsber.
+        CONDENSE ls_ftpost-fval.
+        APPEND ls_ftpost TO lt_ftpost.
+
+
+        ls_ftpost-stype = 'P'.
+        ls_ftpost-count = 2.
+        ls_ftpost-fnam  = 'BSEG-SGTXT'.
+        ls_ftpost-fval  = 'COFACE CUSTOMER PAYMENT'.
+        CONDENSE ls_ftpost-fval.
+        APPEND ls_ftpost TO lt_ftpost.
+
+
+
+        CLEAR ls_return.
+        CALL FUNCTION 'POSTING_INTERFACE_START'
+          EXPORTING
+            i_function         = 'C'
+            i_group            = ' '
+            i_mode             = lv_mode
+            i_update           = 'S'
+            i_user             = sy-uname
+            i_xbdcc            = ' '
+          EXCEPTIONS
+            client_incorrect   = 1
+            function_invalid   = 2
+            group_name_missing = 3
+            mode_invalid       = 4
+            update_invalid     = 5
+            error_message      = 6
+            OTHERS             = 99.
+
+        CALL FUNCTION 'POSTING_INTERFACE_CLEARING'
+          EXPORTING
+            i_auglv                    = 'UMBUCHNG'
+            i_tcode                    = 'FB05'
+            i_sgfunct                  = 'C'
+          IMPORTING
+            e_msgid                    = ls_return-id
+            e_msgno                    = ls_return-number
+            e_msgty                    = ls_return-type
+            e_msgv1                    = ls_return-message_v1
+            e_msgv2                    = ls_return-message_v2
+            e_msgv3                    = ls_return-message_v3
+            e_msgv4                    = ls_return-message_v4
+          TABLES
+            t_blntab                   = lt_blntab
+            t_ftclear                  = lt_ftclear
+            t_ftpost                   = lt_ftpost
+            t_fttax                    = lt_fttax
+          EXCEPTIONS
+            clearing_procedure_invalid = 1
+            clearing_procedure_missing = 2
+            table_t041a_empty          = 3
+            transaction_code_invalid   = 4
+            amount_format_error        = 5
+            too_many_line_items        = 6
+            company_code_invalid       = 7
+            screen_not_found           = 8
+            no_authorization           = 9
+            error_message              = 10
+            OTHERS                     = 99.
+
+
+        IF ls_return IS INITIAL AND sy-msgid IS NOT INITIAL.
+          ls_return-id         = sy-msgid.
+          ls_return-type       = sy-msgty.
+          ls_return-number     = sy-msgno.
+          ls_return-message_v1 = sy-msgv1.
+          ls_return-message_v2 = sy-msgv2.
+          ls_return-message_v3 = sy-msgv3.
+          ls_return-message_v4 = sy-msgv4.
+        ENDIF.
+
+        IF ls_return-id EQ '00' AND ls_return-number EQ '344'.
+          ls_return-type = 'E'.
+        ENDIF.
+
+        CALL FUNCTION 'POSTING_INTERFACE_END'
+          EXCEPTIONS
+            session_not_processable = 1
+            error_message           = 2
+            OTHERS                  = 99.
+
+        lo_log = NEW cl_ptu_message( ).
+
+*        lo_log->if_ptu_message~add_bapiret2(
+*          EXPORTING
+*            is_bapiret2 = ls_return  ).
+        APPEND ls_return TO lt_return.
+
+*        IF ls_return-type CA 'AEX'.
+*          CONTINUE.ü
+*
+*        ELSEIF ls_return-id     EQ 'F5'
+*           AND ls_return-number EQ '312'.
+*
+*          <fs_data>-clearing_number = ls_return-message_v1.
+*          <fs_data>-clearing_year   = sy-datum(4).
+      ENDIF.
+
+    ENDLOOP.
+    LOOP AT lt_return INTO ls_return
+  WHERE type CA 'AEX'.
+      EXIT.
+    ENDLOOP.
+    IF sy-subrc eq 0.
+
+      CALL METHOD lo_log->if_ptu_message~add_bapiret2_tab
+        EXPORTING
+          it_bapiret2 = lt_return.
+        IF lo_log->has_messages( ) EQ abap_true.
+    lo_log->display_log( iv_as_popup = 'X' iv_use_grid = 'X' ) .
+
+        ENDIF.
+
+        ELSE.
+      MODIFY zfi_t0150 FROM TABLE gt_data.
+      IF sy-subrc eq 0 .
+      commit WORK AND WAIT.
+      ELSE.
+        ROLLBACK WORK.
+      ENDIF.
+
+*      IF sy-subrc EQ 0.
+*        MESSAGE 'İşlemler yapıldı' TYPE 'I' DISPLAY LIKE 'S'.
+*      ENDIF.
+*    ELSE.
+*      MESSAGE  'En az bir satır seçiniz' TYPE 'I' DISPLAY LIKE 'E'..
+
+    ENDIF.
+
+
+    lif_prepearing_alv~refresh_alv(
+      CHANGING
+        co_alvgird = go_alvgrid ).
+
+
+
+  ENDMETHOD.
+
+
+  METHOD lif_check_screen~check_bukrs.
+
+    CHECK iv_bukrs IS NOT INITIAL.
+
+    gt_bukrs = VALUE #( ( sign   = 'I'
+                          option = 'EQ'
+                          low    = iv_bukrs ) ).
+
+    CALL FUNCTION 'BUKRS_AUTHORITY_CHECK'
+      EXPORTING
+        xdatabase      = 'K'
+      TABLES
+        xbukreis       = gt_bukrs
+      EXCEPTIONS
+        not_authorized = 1
+        OTHERS         = 2.
+
+    IF sy-subrc <> 0.
+      MESSAGE ID
+        sy-msgid
+      TYPE
+        sy-msgty
+      NUMBER
+        sy-msgno
+      WITH
+        sy-msgv1
+        sy-msgv2
+        sy-msgv3
+        sy-msgv4.
+    ENDIF.
+
+
+
+  ENDMETHOD.
+  METHOD lif_check_screen~search_help_laufd.
+
+
+    REFRESH:
+      gt_laufk.
+
+
+    gt_laufk = VALUE #( ( sign  = 'I'
+                          laufk = space ) ).
+
+    CALL FUNCTION 'F4_ZAHLLAUF'
+      EXPORTING
+        f1typ = 'D'
+        f2nme = 'F110V-LAUFI'
+      IMPORTING
+        laufd = cv_laufd
+      TABLES
+        laufk = gt_laufk.
+
+  ENDMETHOD.
+  METHOD lif_check_screen~search_help_laufi.
+
+
+    REFRESH:
+      gt_laufk.
+
+    gt_laufk = VALUE #( ( sign  = 'I'
+                          laufk = space ) ).
+
+    CALL FUNCTION 'F4_ZAHLLAUF'
+      EXPORTING
+        f1typ = 'D'
+        f2nme = 'F110V-LAUFD'
+      IMPORTING
+        laufi = cv_laufi
+      TABLES
+        laufk = gt_laufk.
+
+  ENDMETHOD.
+
+
+  METHOD lif_check_screen~mapping_lifnr.
+
+    CLEAR:
+      p_lifnr.
+
+
+    SELECT
+    SINGLE lifnr
+      FROM zfi_ct0097
+      INTO p_lifnr
+     WHERE bukrs EQ iv_bukrs.
+
+  ENDMETHOD.
+
+
+  METHOD lif_check_screen~call_maintenance.
+
+    CHECK:
+      iv_ucomm EQ 'FC01'.
+
+    CALL FUNCTION 'VIEW_MAINTENANCE_CALL'
+      EXPORTING
+        action                       = 'U'
+        view_name                    = 'ZFI_V_0019'
+      EXCEPTIONS
+        client_reference             = 1
+        foreign_lock                 = 2
+        invalid_action               = 3
+        no_clientindependent_auth    = 4
+        no_database_function         = 5
+        no_editor_function           = 6
+        no_show_auth                 = 7
+        no_tvdir_entry               = 8
+        no_upd_auth                  = 9
+        only_show_allowed            = 10
+        system_failure               = 11
+        unknown_field_in_dba_sellist = 12
+        view_not_found               = 13
+        maintenance_prohibited       = 14
+        OTHERS                       = 15.
+
+    IF sy-subrc <> 0.
+      MESSAGE ID
+        sy-msgid
+      TYPE
+        sy-msgty
+      NUMBER
+        sy-msgno
+      WITH
+        sy-msgv1
+        sy-msgv2
+        sy-msgv3
+        sy-msgv4.
+    ENDIF.
+  ENDMETHOD.
+
+
+
+  METHOD lif_check_screen~enabled_disabled_control.
+
+    LOOP AT SCREEN.
+      IF screen-group1 EQ 'LFN'.
+        screen-input = 0.
+        MODIFY SCREEN.
+      ENDIF.
+    ENDLOOP.
+
+  ENDMETHOD.
+
+
+  METHOD lif_check_screen~mapping_function_key.
+
+
+    gs_functxt-icon_id    = icon_maintenance_object_list.
+    gs_functxt-quickinfo  = TEXT-001.
+    gs_functxt-icon_text  = TEXT-001.
+
+    sscrfields-functxt_01 = gs_functxt.
+
+
+  ENDMETHOD.
+
+
+
+ENDCLASS.
